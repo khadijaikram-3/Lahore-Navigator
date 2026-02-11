@@ -29,3 +29,8 @@ which is visually highlighted in the interface.
 (Add your GitHub Pages link here after enabling it)
 
 ## Screenshots
+
+![Menu Dropdown](Screenshot/menu_dropdown.png.png)
+![Route View](Screenshot/route_view.png.png)
+![Shortest Route](Screenshot/shortest_route.png.png)
+
