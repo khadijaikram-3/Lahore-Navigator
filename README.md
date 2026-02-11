@@ -26,7 +26,7 @@ which is visually highlighted in the interface.
 
 ## Live Demo
 
-(Add your GitHub Pages link here after enabling it)
+https://khadijaikram-3.github.io/Lahore-Navigator/
 
 ## Screenshots
 
