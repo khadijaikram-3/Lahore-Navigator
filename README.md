@@ -28,9 +28,4 @@ which is visually highlighted in the interface.
 
 https://khadijaikram-3.github.io/Lahore-Navigator/
 
-## Screenshots
-
-![Menu Dropdown](Screenshot/menu_dropdown.png.png)
-![Route View](Screenshot/route_view.png.png)
-![Shortest Route](Screenshot/shortest_route.png.png)
 
