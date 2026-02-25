@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lahore City Navigator</title>
+    
+    <!-- Leaflet & Routing Machine CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
+
+        /* --- SIDEBAR UI --- */
+        #sidebar {
+            position: absolute; top: 15px; left: 15px; bottom: 15px;
+            width: 360px; background: white; z-index: 2000;
+            border-radius: 12px; box-shadow: 0 4px 25px rgba(0,0,0,0.25);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        /* Header */
+        #controls { padding: 20px; background: #f8f9fa; border-bottom: 1px solid #ddd; }
+        
+        h2 { margin: 0 0 15px 0; color: #2c3e50; font-size: 22px; display: flex; align-items: center; gap: 10px; }
+        
+        /* Updated Icon Style */
+        .app-icon {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+        }
+
+        .input-group { margin-bottom: 15px; }
+        .input-label { font-size: 12px; color: #7f8c8d; font-weight: bold; margin-bottom: 5px; display: block; }
+        
+        input[type="text"] { 
+            width: 100%; padding: 10px; box-sizing: border-box;
+            border: 1px solid #ccc; border-radius: 6px; font-size: 14px;
+        }
+        input[type="text"]:focus { outline: none; border-color: #3498db; }
+
+        button#find-btn {
+            width: 100%; padding: 12px; background: #2980b9; color: white;
+            border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 5px;
+        }
+        button#find-btn:hover { background: #1f618d; }
+        button#find-btn:disabled { background: #95a5a6; cursor: wait; }
+
+        /* Results Area */
+        #results-area { flex: 1; padding: 15px; overflow-y: auto; background: #fff; }
+
+        .route-card {
+            background: #fff; border: 1px solid #eee; border-left-width: 6px;
+            border-radius: 6px; padding: 15px; margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05); cursor: pointer;
+        }
+        .route-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .dir-btn { width: 100%; padding: 8px; margin-top: 8px; cursor: pointer; }
+
+        /* Directions Modal */
+        #directions-modal {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: white; z-index: 2001; transform: translateX(100%);
+            transition: transform 0.3s; display: flex; flex-direction: column;
+        }
+        #directions-modal.active { transform: translateX(0); }
+        .dir-header { padding: 15px; background: #2c3e50; color: white; display: flex; justify-content: space-between; }
+        .close-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; }
+        #step-list { flex: 1; overflow-y: auto; padding: 0; margin: 0; list-style: none; }
+        .step-item { padding: 15px; border-bottom: 1px solid #eee; font-size: 14px; display: flex; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div id="controls">
+            <!-- UPDATED HEADER WITH PNG ICON -->
+            <h2>
+                <img src="https://cdn-icons-png.flaticon.com/512/149/149060.png" class="app-icon" alt="Location Icon">
+                Lahore City Navigator
+            </h2>
+            
+            <div class="input-group">
+                <label class="input-label">FROM</label>
+                <input type="text" id="start-input" list="locations-list" placeholder="Enter address or select...">
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">TO</label>
+                <input type="text" id="end-input" list="locations-list" placeholder="Enter address or select...">
+            </div>
+
+            <datalist id="locations-list"></datalist>
+
+            <button id="find-btn">Search Routes</button>
+        </div>
+
+        <div id="results-area">
+            <div style="text-align:center; color:#999; margin-top:40px;">
+                <!-- Updated Icon in Empty State -->
+                <img src="https://cdn-icons-png.flaticon.com/512/854/854878.png" width="64" style="opacity:0.5; margin-bottom:10px;">
+                <br>
+                Enter any address in Lahore to find route.
+            </div>
+        </div>
+
+        <div id="directions-modal">
+            <div class="dir-header">
+                <span id="dir-title">Directions</span>
+                <button class="close-btn" id="close-dir-btn">×</button>
+            </div>
+            <ul id="step-list"></ul>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+    <script src="locations.js"></script>
+
+    <script>
+        /**
+         * =========================================
+         * CLASS: RouteService
+         * =========================================
+         * Responsibility: Mathematical calculations and Data Fetching
+         * Time Complexity: O(N) for linear search
+         */
+        class RouteService {
+            constructor(staticData) {
+                this.db = staticData || [];
+            }
+
+            async getCoordinates(query) {
+                // 1. Search Local DB (O(N))
+                const localMatch = this.db.find(l => l.name.toLowerCase() === query.toLowerCase());
+                if (localMatch) return localMatch;
+
+                // 2. Search Online API (Network Latency)
+                try {
+                    const q = encodeURIComponent(query + ", Lahore, Pakistan");
+                    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    if (data && data.length > 0) {
+                        return { 
+                            lat: parseFloat(data[0].lat), 
+                            lon: parseFloat(data[0].lon), 
+                            name: data[0].display_name.split(',')[0] 
+                        };
+                    }
+                } catch (e) { console.error(e); }
+                return null;
+            }
+
+            calculateMidpoints(start, end) {
+                const midLat = (start.lat + end.lat) / 2;
+                const midLon = (start.lon + end.lon) / 2;
+                return {
+                    v1: L.latLng(midLat + 0.015, midLon + 0.015),
+                    v2: L.latLng(midLat - 0.015, midLon - 0.015)
+                };
+            }
+        }
+
+        /**
+         * =========================================
+         * CLASS: MapManager
+         * =========================================
+         * Responsibility: Leaflet.js abstraction
+         * Composition: Owned by App
+         */
+        class MapManager {
+            constructor(divId) {
+                this.map = L.map(divId).setView([31.5204, 74.3587], 12);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(this.map);
+                this.markers = [];
+                this.controls = [];
+            }
+
+            addStaticDots(list) {
+                list.forEach(l => L.circleMarker([l.lat, l.lon], {radius:4, color:'#999', weight:1}).addTo(this.map));
+            }
+
+            resetMap() {
+                this.markers.forEach(m => this.map.removeLayer(m));
+                this.markers = [];
+                this.controls.forEach(c => this.map.removeControl(c));
+                this.controls = [];
+                document.querySelectorAll('.leaflet-routing-container').forEach(e => e.style.display='none');
+            }
+
+            addJourneyMarkers(start, end) {
+                const s = L.marker([start.lat, start.lon]).addTo(this.map).bindPopup("Start: "+start.name).openPopup();
+                const e = L.marker([end.lat, end.lon]).addTo(this.map).bindPopup("End: "+end.name);
+                this.markers.push(s, e);
+            }
+
+            drawRoute(start, end, ways, color, zoom, cb) {
+                const pts = [L.latLng(start.lat,start.lon), ...ways, L.latLng(end.lat,end.lon)];
+                const c = L.Routing.control({
+                    waypoints: pts,
+                    lineOptions: { styles: [{color:color, opacity:0.8, weight:6}] },
+                    createMarker: () => null,
+                    addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: zoom, show: false
+                }).addTo(this.map);
+
+                c.on('routesfound', (e) => {
+                    this.controls.push(c);
+                    document.querySelectorAll('.leaflet-routing-container').forEach(el => el.style.display='none');
+                    if(cb) cb(e.routes[0]);
+                });
+                c.on('routingerror', () => { if(cb) cb(null); });
+            }
+        }
+
+        /**
+         * =========================================
+         * CLASS: UIManager
+         * =========================================
+         * Responsibility: DOM Manipulation & Events
+         */
+        class UIManager {
+            constructor() {
+                this.store = {}; // Stores route instructions
+                this.sInput = document.getElementById('start-input');
+                this.eInput = document.getElementById('end-input');
+                this.btn = document.getElementById('find-btn');
+                this.area = document.getElementById('results-area');
+                this.modal = document.getElementById('directions-modal');
+                
+                document.getElementById('close-dir-btn').onclick = () => this.toggleModal(false);
+            }
+
+            fillDropdown(list) {
+                const dl = document.getElementById('locations-list');
+                list.sort((a,b)=>a.name.localeCompare(b.name));
+                list.forEach(l => {
+                    const opt = document.createElement('option');
+                    opt.value = l.name;
+                    dl.appendChild(opt);
+                });
+            }
+
+            toggleLoading(active) {
+                this.btn.disabled = active;
+                this.btn.innerText = active ? "Calculating..." : "Search Routes";
+                if(active) {
+                    this.area.innerHTML = "";
+                    this.toggleModal(false);
+                }
+            }
+
+            addCard(title, dist, time, color, steps) {
+                this.store[color] = { title, steps };
+                const div = document.createElement('div');
+                div.className = 'route-card';
+                div.style.borderLeftColor = color;
+                div.innerHTML = `
+                    <div class="route-header"><b style="color:${color}">${title}</b> <span>${time}</span></div>
+                    <div style="font-size:13px;color:#666">Distance: <b>${dist}</b></div>
+                    <button class="dir-btn" onclick="app.uiManager.showDetails('${color}')">View Directions</button>
+                `;
+                this.area.appendChild(div);
+            }
+
+            showDetails(color) {
+                const d = this.store[color];
+                if(!d) return;
+                document.getElementById('dir-title').innerText = d.title;
+                const ul = document.getElementById('step-list');
+                ul.innerHTML = "";
+                d.steps.forEach(s => {
+                    const li = document.createElement('li');
+                    li.className = 'step-item';
+                    li.innerHTML = `<div><b>${s.text}</b><br><small style="color:#888">${Math.round(s.distance)} m</small></div>`;
+                    ul.appendChild(li);
+                });
+                this.toggleModal(true);
+            }
+
+            toggleModal(show) {
+                show ? this.modal.classList.add('active') : this.modal.classList.remove('active');
+            }
+        }
+
+        /**
+         * =========================================
+         * CLASS: LahoreNavigator (Main Controller)
+         * =========================================
+         * Responsibility: Coordination
+         */
+        class LahoreNavigator {
+            constructor() {
+                const data = (typeof mapLocations !== 'undefined') ? mapLocations : [];
+                
+                // Initialize Compositions
+                this.mapManager = new MapManager('map');
+                this.uiManager = new UIManager();
+                this.routeService = new RouteService(data);
+
+                // Initial Setup
+                this.mapManager.addStaticDots(data);
+                this.uiManager.fillDropdown(data);
+
+                // Event Listener
+                document.getElementById('find-btn').onclick = () => this.start();
+            }
+
+            async start() {
+                const sVal = this.uiManager.sInput.value;
+                const eVal = this.uiManager.eInput.value;
+                
+                if(!sVal || !eVal) return alert("Please fill both inputs");
+
+                this.uiManager.toggleLoading(true);
+                this.mapManager.resetMap();
+
+                // 1. Resolve Locations
+                const sLoc = await this.routeService.getCoordinates(sVal);
+                const eLoc = await this.routeService.getCoordinates(eVal);
+
+                if(!sLoc || !eLoc) {
+                    this.uiManager.toggleLoading(false);
+                    return alert("Address not found.");
+                }
+
+                this.mapManager.addJourneyMarkers(sLoc, eLoc);
+
+                // 2. Calculate Logic
+                const mids = this.routeService.calculateMidpoints(sLoc, eLoc);
+
+                // 3. Chain Route Requests
+                this.fetchRoute(sLoc, eLoc, [], '#8e44ad', 'Recommended', true, () => {
+                    this.fetchRoute(sLoc, eLoc, [mids.v1], '#2980b9', 'Alternative 1', false, () => {
+                        this.fetchRoute(sLoc, eLoc, [mids.v2], '#e67e22', 'Alternative 2', false, () => {
+                            this.uiManager.toggleLoading(false);
+                        });
+                    });
+                });
+            }
+
+            fetchRoute(start, end, ways, color, label, zoom, next) {
+                this.mapManager.drawRoute(start, end, ways, color, zoom, (route) => {
+                    if(route) {
+                        const d = (route.summary.totalDistance/1000).toFixed(1)+" km";
+                        const t = Math.round(route.summary.totalTime/60)+" min";
+                        this.uiManager.addCard(label, d, t, color, route.instructions);
+                    }
+                    if(next) setTimeout(next, 500); // Small delay for API niceness
+                });
+            }
+        }
+
+        // Start App
+        let app; 
+        window.onload = () => { app = new LahoreNavigator(); };
+
+    </script>
+</body>
+</html>
